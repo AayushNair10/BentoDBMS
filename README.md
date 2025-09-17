@@ -154,10 +154,8 @@ Example: 	EXEC input.txt;
 *	Transaction Management
 *	User Management
 *	Authentication
-*	Join
 *	Foreign Keys
 *	Views
-*	Complex Select
 
 ## Design & Implementation
 See [wiki](https://github.com/halfvim/MiniDB/wiki/Design-&-Implementation).
