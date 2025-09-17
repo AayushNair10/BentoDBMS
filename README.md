@@ -1,7 +1,9 @@
-MiniDB: Mini Database Engine in C++
+BentoDBMS: Mini Database Engine in C++
 ===================================
 
-MiniDB is a simplified database engine implemented in C++, for the purpose of understanding the underlying details of database system. This database engine implements the most basic SQL operations as well as index on B+ tree.
+BentoDBMS is a simplified database engine implemented in C++, for the purpose of understanding the underlying details of database system. This database engine implements the most basic SQL operations as well as index on B+ tree.
+
+⚠️ **Disclaimer:** Built upon [MiniDB](https://github.com/nrthyrk/minidb), adding complex `SELECT` and `JOIN` commands, fixing exception handling bugs, improving the `SHOW` command, and enhancing user input for better usability.
 
 ## Compile
 
@@ -156,9 +158,3 @@ Example: 	EXEC input.txt;
 *	Authentication
 *	Foreign Keys
 *	Views
-
-## Design & Implementation
-See [wiki](https://github.com/halfvim/MiniDB/wiki/Design-&-Implementation).
-
-## Test Runs
-See [wiki](https://github.com/halfvim/MiniDB/wiki/Test-Run).
