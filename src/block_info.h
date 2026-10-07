@@ -16,6 +16,7 @@ private:
   char *data_; // Pointer to a memory block (allocated as 4 * 1024 bytes).
   bool dirty_; //Flag indicating if the block has been modified.
   long age_; //Age counter for the block.
+  int pin_count_; //Number of users holding the block. A pinned block is never recycled.
   BlockInfo *next_; //Pointer to the next BlockInfo block in a linked list.
 
 // Implementing replacement policies like Least Recently Used (LRU) or Least Frequently Used (LFU)
@@ -23,7 +24,8 @@ private:
 
 public:
   BlockInfo(int num)
-      : dirty_(false), next_(NULL), file_(NULL), age_(0), block_num_(num) {
+      : dirty_(false), next_(NULL), file_(NULL), age_(0), pin_count_(0),
+        block_num_(num) {
     data_ = new char[4 * 1024];
   }
   virtual ~BlockInfo() { delete[] data_; }
@@ -45,6 +47,10 @@ public:
 
   void IncreaseAge() { ++age_; }
   void ResetAge() { age_ = 0; }
+
+  bool pinned() { return pin_count_ > 0; }
+  void Pin() { ++pin_count_; }
+  void Unpin() { --pin_count_; }
 
 //   Offset	Purpose
 // 0	Previous block number (int)
@@ -70,6 +76,19 @@ public:
 
   void ReadInfo(std::string path);
   void WriteInfo(std::string path);
+};
+
+// Pins a block for as long as the object is in scope, so the pointer stays
+// valid while other blocks are being loaded.
+class BlockPin {
+private:
+  BlockInfo *block_;
+  BlockPin(const BlockPin &);
+  BlockPin &operator=(const BlockPin &);
+
+public:
+  BlockPin(BlockInfo *block) : block_(block) { block_->Pin(); }
+  ~BlockPin() { block_->Unpin(); }
 };
 
 #endif /* MINIDB_BLOCK_INFO_H_ */

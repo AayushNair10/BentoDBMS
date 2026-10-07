@@ -21,6 +21,7 @@ void BlockInfo::ReadInfo(std::string path) {
   ifs.seekg(block_num_ * 4 * 1024);
   ifs.read(data_, 4 * 1024);
   ifs.close();
+  stats.block_reads++;
 }
 
 void BlockInfo::WriteInfo(std::string path) {
@@ -40,4 +41,5 @@ void BlockInfo::WriteInfo(std::string path) {
   ofs.seekp(block_num_ * 4 * 1024);
   ofs.write(data_, 4 * 1024);
   ofs.close();
+  stats.block_writes++;
 }

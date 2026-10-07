@@ -93,78 +93,80 @@ void Interpreter::FormatSQL() {
 void Interpreter::TellSQLType() {
   if (sql_vector_.size() == 0) {
     sql_type_ = -1;
-    cout << "SQL TYPE: #EMPTY#" << endl;
+    debug_out() << "SQL TYPE: #EMPTY#" << endl;
     return;
   }
+  // Second word of the statement, empty when there is none
+  string second = sql_vector_.size() > 1 ? sql_vector_[1] : "";
   if (sql_vector_[0] == "quit") {
-    cout << "SQL TYPE: #QUIT#" << endl;
+    debug_out() << "SQL TYPE: #QUIT#" << endl;
     sql_type_ = 10;
   } else if (sql_vector_[0] == "help") {
-    cout << "SQL TYPE: #HELP#" << endl;
+    debug_out() << "SQL TYPE: #HELP#" << endl;
     sql_type_ = 20;
   } else if (sql_vector_[0] == "create") {
-    if (sql_vector_[1] == "database") {
-      cout << "SQL TYPE: #CREATE DATABASE#" << endl;
+    if (second == "database") {
+      debug_out() << "SQL TYPE: #CREATE DATABASE#" << endl;
       sql_type_ = 30;
-    } else if (sql_vector_[1] == "table") {
-      cout << "SQL TYPE: #CREATE TABLE#" << endl;
+    } else if (second == "table") {
+      debug_out() << "SQL TYPE: #CREATE TABLE#" << endl;
       sql_type_ = 31;
-    } else if (sql_vector_[1] == "index") {
-      cout << "SQL TYPE: #CREATE INDEX#" << endl;
+    } else if (second == "index") {
+      debug_out() << "SQL TYPE: #CREATE INDEX#" << endl;
       sql_type_ = 32;
     } else {
       sql_type_ = -1;
     }
   } else if (sql_vector_[0] == "show") {
-    if (sql_vector_[1] == "databases") {
-      cout << "SQL TYPE: #SHOW DATABASES#" << endl;
+    if (second == "databases") {
+      debug_out() << "SQL TYPE: #SHOW DATABASES#" << endl;
       sql_type_ = 40;
-    } else if (sql_vector_[1] == "tables") {
-      cout << "SQL TYPE: #SHOW TABLES#" << endl;
+    } else if (second == "tables") {
+      debug_out() << "SQL TYPE: #SHOW TABLES#" << endl;
       sql_type_ = 41;
-    } else if (sql_vector_[1] == "table") {
-        cout << "SQL TYPE: #SHOW TABLE#" << endl;
+    } else if (second == "table") {
+        debug_out() << "SQL TYPE: #SHOW TABLE#" << endl;
         sql_type_ = 42;
     } else {
       sql_type_ = -1;
     }
   } else if (sql_vector_[0] == "drop") {
-    if (sql_vector_[1] == "database") {
-      cout << "SQL TYPE: #DROP DATABASE#" << endl;
+    if (second == "database") {
+      debug_out() << "SQL TYPE: #DROP DATABASE#" << endl;
       sql_type_ = 50;
-    } else if (sql_vector_[1] == "table") {
-      cout << "SQL TYPE: #DROP TABLE#" << endl;
+    } else if (second == "table") {
+      debug_out() << "SQL TYPE: #DROP TABLE#" << endl;
       sql_type_ = 51;
-    } else if (sql_vector_[1] == "index") {
-      cout << "SQL TYPE: #DROP INDEX#" << endl;
+    } else if (second == "index") {
+      debug_out() << "SQL TYPE: #DROP INDEX#" << endl;
       sql_type_ = 52;
     } else {
       sql_type_ = -1;
     }
   } else if (sql_vector_[0] == "use") {
-    cout << "SQL TYPE: #USE#" << endl;
+    debug_out() << "SQL TYPE: #USE#" << endl;
     sql_type_ = 60;
   } else if (sql_vector_[0] == "insert") {
-    cout << "SQL TYPE: #INSERT#" << endl;
+    debug_out() << "SQL TYPE: #INSERT#" << endl;
     sql_type_ = 70;
   } else if (sql_vector_[0] == "exec") {
-    cout << "SQL TYPE: #EXEC#" << endl;
+    debug_out() << "SQL TYPE: #EXEC#" << endl;
     sql_type_ = 80;
   } else if (sql_vector_[0] == "select") {
-    cout << "SQL TYPE: #SELECT#" << endl;
+    debug_out() << "SQL TYPE: #SELECT#" << endl;
     sql_type_ = 90;
   } else if (sql_vector_[0] == "delete") {
-    cout << "SQL TYPE: #DELETE#" << endl;
+    debug_out() << "SQL TYPE: #DELETE#" << endl;
     sql_type_ = 100;
   } else if (sql_vector_[0] == "update") {
-    cout << "SQL TYPE: #UPDATE#" << endl;
+    debug_out() << "SQL TYPE: #UPDATE#" << endl;
     sql_type_ = 110;
   } else if (sql_vector_[0] == "join") {
-    cout << "SQL TYPE: #JOIN#" << endl;
+    debug_out() << "SQL TYPE: #JOIN#" << endl;
     sql_type_ = 120;
   } else {
     sql_type_ = -1;
-    cout << "SQL TYPE: #UNKNOWN#" << endl;
+    debug_out() << "SQL TYPE: #UNKNOWN#" << endl;
   }
 }
 
@@ -200,6 +202,9 @@ void Interpreter::Run() {
       api->ShowTables();
     } break;
     case 42: {
+        if (sql_vector_.size() <= 2) {
+          throw SyntaxErrorException("expected a table name");
+        }
         string tb_name = sql_vector_[2];
         sql_vector_.clear();
         sql_vector_ = {"select", "*", "from", tb_name};
@@ -236,12 +241,17 @@ void Interpreter::Run() {
       SQLExec *st = new SQLExec(sql_vector_);
       string contents;
       ifstream in(st->file_name(), ios::in | ios::binary);
+      if (!in.is_open()) {
+        cerr << "Cannot open file: " << st->file_name() << endl;
+        delete st;
+        break;
+      }
       in.seekg(0, std::ios::end);
       contents.resize(in.tellg());
       in.seekg(0, std::ios::beg);
       in.read(&contents[0], contents.size());
       in.close();
-      cout << endl;
+      debug_out() << endl;
       vector<string> sqls = split(contents, ";");
       for (int i = 0; i < sqls.size() - 1; ++i) {
         ExecSQL(sqls[i]);
@@ -270,10 +280,23 @@ void Interpreter::Run() {
     }
     break;
     default:
+      if (sql_vector_.size() != 0) {
+        cerr << "Unknown command: " << sql_statement_ << endl;
+      }
       break;
     }
   } catch (SyntaxErrorException &e) {
-    cerr << "Syntax Error!" << endl;
+    cerr << "Syntax Error: " << e.what() << endl;
+  } catch (std::out_of_range &e) {
+    cerr << "Syntax Error: statement is incomplete" << endl;
+  } catch (ColumnNotExistException &e) {
+    cerr << "Column doesn't exist: " << e.what() << endl;
+  } catch (ColumnCountNotMatchException &e) {
+    cerr << "Number of values doesn't match the number of columns!" << endl;
+  } catch (RecordTooLongException &e) {
+    cerr << "Row is too long: a row must fit in one block (4084 bytes)!" << endl;
+  } catch (BufferFullException &e) {
+    cerr << "Buffer is full: too many blocks in use at once!" << endl;
   } catch (NoDatabaseSelectedException &e) {
     cerr << "No database selected!" << endl;
   } catch (DatabaseNotExistException &e) {
@@ -296,6 +319,9 @@ void Interpreter::Run() {
     cerr << "Index must be created on primary key!" << endl;
   } catch (PrimaryKeyConflictException &e) {
     cerr << "Primary key conflicts!" << endl;
+  } catch (std::exception &e) {
+    // Anything unexpected is reported instead of ending the session
+    cerr << "Error: " << e.what() << endl;
   }
 }
 
@@ -303,7 +329,7 @@ void Interpreter::ExecSQL(string statement) {
   sql_statement_ = statement;
   FormatSQL();
   TellSQLType();
-  cout << "SQL STATEMENT: " << sql_statement_ << endl;
+  debug_out() << "SQL STATEMENT: " << sql_statement_ << endl;
   Run();
-  cout << endl;
+  debug_out() << endl;
 }

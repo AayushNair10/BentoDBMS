@@ -18,6 +18,15 @@ MiniDBAPI::MiniDBAPI(std::string p) : path_(p), hdl_(NULL) {
   cm_ = new CatalogManager(p);
 }
 
+// Throws if a column used in a WHERE clause is not in the table
+static void CheckWhereColumns(Table *tb, std::vector<SQLWhere> &wheres) {
+  for (unsigned int i = 0; i < wheres.size(); ++i) {
+    if (tb->GetAttributeIndex(wheres[i].key) == -1) {
+      throw ColumnNotExistException(wheres[i].key);
+    }
+  }
+}
+
 MiniDBAPI::~MiniDBAPI() {
   // hdl_ is initialized in #Use#
   delete hdl_;
@@ -29,7 +38,7 @@ void MiniDBAPI::Quit() {
   hdl_ = NULL;
   delete cm_;
   cm_ = NULL;
-  std::cout << "Quiting..." << std::endl;
+  debug_out() << "Quiting..." << std::endl;
 }
 
 void MiniDBAPI::Help() {
@@ -54,7 +63,7 @@ void MiniDBAPI::Help() {
 }
 
 void MiniDBAPI::CreateDatabase(SQLCreateDatabase &st) {
-  std::cout << "Creating database: " << st.db_name() << std::endl;
+  debug_out() << "Creating database: " << st.db_name() << std::endl;
   std::string folder_name(path_ + st.db_name());
   boost::filesystem::path folder_path(folder_name);
  //Used to define language used in the file system
@@ -69,10 +78,10 @@ void MiniDBAPI::CreateDatabase(SQLCreateDatabase &st) {
   }
 
   boost::filesystem::create_directories(folder_path);
-  std::cout << "Database folder created!" << std::endl;
+  debug_out() << "Database folder created!" << std::endl;
 
   cm_->CreateDatabase(st.db_name());
-  std::cout << "Catalog written!" << std::endl;
+  debug_out() << "Catalog written!" << std::endl;
   //File handling
   cm_->WriteArchiveFile();
 }
@@ -87,7 +96,7 @@ void MiniDBAPI::ShowDatabases() {
 }
 
 void MiniDBAPI::DropDatabase(SQLDropDatabase &st) {
-  std::cout << "Dropping database: " << st.db_name() << std::endl;
+  debug_out() << "Dropping database: " << st.db_name() << std::endl;
 
   bool found = false;
 
@@ -110,11 +119,11 @@ void MiniDBAPI::DropDatabase(SQLDropDatabase &st) {
     std::cout << "Database folder doesn't exists!" << std::endl;
   } else {
     boost::filesystem::remove_all(folder_path);
-    std::cout << "Database folder deleted!" << std::endl;
+    debug_out() << "Database folder deleted!" << std::endl;
   }
 
   cm_->DeleteDatabase(st.db_name());
-  std::cout << "Database removed from catalog!" << std::endl;
+  debug_out() << "Database removed from catalog!" << std::endl;
   cm_->WriteArchiveFile();
 
   if (st.db_name() == curr_db_) {
@@ -132,7 +141,7 @@ void MiniDBAPI::Use(SQLUse &st) {
   }
 
   if (curr_db_.length() != 0) {
-    std::cout << "Closing the old database: " << curr_db_ << std::endl;
+    debug_out() << "Closing the old database: " << curr_db_ << std::endl;
     cm_->WriteArchiveFile();
     delete hdl_;
   }
@@ -141,7 +150,7 @@ void MiniDBAPI::Use(SQLUse &st) {
 }
 
 void MiniDBAPI::CreateTable(SQLCreateTable &st) {
-  std::cout << "Creating table: " << st.tb_name() << std::endl;
+  debug_out() << "Creating table: " << st.tb_name() << std::endl;
   if (curr_db_.length() == 0) {
     throw NoDatabaseSelectedException();
   }
@@ -155,6 +164,15 @@ void MiniDBAPI::CreateTable(SQLCreateTable &st) {
     throw TableAlreadyExistsException();
   }
 
+  // A row has to fit in one block, after the 12 byte block header
+  int record_length = 0;
+  for (unsigned int i = 0; i < st.attrs().size(); ++i) {
+    record_length += st.attrs()[i].length();
+  }
+  if (record_length > 4 * 1024 - 12) {
+    throw RecordTooLongException();
+  }
+
   std::string file_name(path_ + curr_db_ + "/" + st.tb_name() + ".records");
   boost::filesystem::path folder_path(file_name);
 
@@ -165,10 +183,10 @@ void MiniDBAPI::CreateTable(SQLCreateTable &st) {
  //ofstream (output file stream) is from <fstream>, used for writing data to files.
   ofstream ofs(file_name);
   ofs.close();
-  std::cout << "Table file created!" << std::endl;
+  debug_out() << "Table file created!" << std::endl;
 
   db->CreateTable(st);
-  std::cout << "Catalog written!" << std::endl;
+  debug_out() << "Catalog written!" << std::endl;
   cm_->WriteArchiveFile();
 }
 
@@ -214,6 +232,8 @@ void MiniDBAPI::Select(SQLSelect &st) {
   if (tb == NULL) {
     throw TableNotExistException();
   }
+
+  CheckWhereColumns(tb, st.wheres());
 
   RecordManager *rm = new RecordManager(cm_, hdl_, curr_db_);
   rm->Select(st);
@@ -262,10 +282,10 @@ void MiniDBAPI::DropTable(SQLDropTable &st) {
     std::cout << "Table file doesn't exist!" << std::endl;
   } else {
     boost::filesystem::remove(file_name);
-    std::cout << "Table file removed!" << std::endl;
+    debug_out() << "Table file removed!" << std::endl;
   }
 
-  std::cout << "Removing Index files!" << std::endl;
+  debug_out() << "Removing Index files!" << std::endl;
   for (int i = 0; i < tb->GetIndexNum(); ++i) {
     std::string file_name(path_ + curr_db_ + "/" + tb->GetIndex(i)->name() +
                           ".index");
@@ -273,12 +293,12 @@ void MiniDBAPI::DropTable(SQLDropTable &st) {
       std::cout << "Index file doesn't exist!" << std::endl;
     } else {
       boost::filesystem::remove(file_name);
-      std::cout << "Index file removed!" << std::endl;
+      debug_out() << "Index file removed!" << std::endl;
     }
   }
 
   db->DropTable(st);
-  std::cout << "Catalog written!" << std::endl;
+  debug_out() << "Catalog written!" << std::endl;
   cm_->WriteArchiveFile();
 }
 
@@ -303,10 +323,10 @@ void MiniDBAPI::DropIndex(SQLDropIndex &st) {
     return;
   }
   boost::filesystem::remove(file_name);
-  std::cout << "Index file removed!" << std::endl;
+  debug_out() << "Index file removed!" << std::endl;
 
   db->DropIndex(st);
-  std::cout << "Catalog written!" << std::endl;
+  debug_out() << "Catalog written!" << std::endl;
   cm_->WriteArchiveFile();
 }
 
@@ -325,6 +345,8 @@ void MiniDBAPI::Delete(SQLDelete &st) {
   if (tb == NULL) {
     throw TableNotExistException();
   }
+
+  CheckWhereColumns(tb, st.wheres());
 
   RecordManager *rm = new RecordManager(cm_, hdl_, curr_db_);
   rm->Delete(st);
@@ -345,6 +367,13 @@ void MiniDBAPI::Update(SQLUpdate &st) {
 
   if (tb == NULL) {
     throw TableNotExistException();
+  }
+
+  CheckWhereColumns(tb, st.wheres());
+  for (unsigned int i = 0; i < st.keyvalues().size(); ++i) {
+    if (tb->GetAttributeIndex(st.keyvalues()[i].key) == -1) {
+      throw ColumnNotExistException(st.keyvalues()[i].key);
+    }
   }
 
   RecordManager *rm = new RecordManager(cm_, hdl_, curr_db_);

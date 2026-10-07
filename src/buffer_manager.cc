@@ -16,8 +16,10 @@ BlockInfo *BufferManager::GetFileBlock(string db_name, string tb_name,
   if (file) {
     BlockInfo *block = fhandle_->GetBlockInfo(file, block_num);
     if (block) {
+      stats.cache_hits++;
       return block;
     } else {
+      stats.cache_misses++;
       BlockInfo *bp = GetUsableBlock();
       bp->set_block_num(block_num);
       bp->set_file(file);
@@ -26,6 +28,7 @@ BlockInfo *BufferManager::GetFileBlock(string db_name, string tb_name,
       return bp;
     }
   } else {
+    stats.cache_misses++;
     BlockInfo *bp = GetUsableBlock();
     bp->set_block_num(block_num);
     FileInfo *fp = new FileInfo(db_name, file_type, tb_name, 0, 0, NULL, NULL);

@@ -1,6 +1,7 @@
 #include "file_handle.h"
 #include <fstream>
 #include "commons.h"
+#include "exceptions.h"
 
 using namespace std;
 //File Info:
@@ -102,7 +103,8 @@ BlockInfo *FileHandle::RecycleBlock() {
     BlockInfo *bp = fp->first_block();
     while (bp != NULL) {
 
-      if (oldest == NULL || bp->age() > oldest->age()) {
+      // A pinned block is still in use and must not be recycled
+      if (!bp->pinned() && (oldest == NULL || bp->age() > oldest->age())) {
         oldestbefore = bpbefore;
         oldest = bp;
       }
@@ -111,6 +113,11 @@ BlockInfo *FileHandle::RecycleBlock() {
     }
     fp = fp->next();
   }
+
+  if (oldest == NULL) {
+    throw BufferFullException();
+  }
+  stats.evictions++;
 
   if (oldest->dirty()) {
     oldest->WriteInfo(path_);

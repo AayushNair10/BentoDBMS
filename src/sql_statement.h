@@ -1,6 +1,7 @@
 #ifndef MINIDB_SQL_STATEMENT_H_
 #define MINIDB_SQL_STATEMENT_H_
 
+#include <cstring>
 #include <string>
 #include <vector>
 
@@ -56,6 +57,18 @@ public:
     memcpy(key_, t1.key_, length_);
   }
 
+// Copy Assignment (without it the default one copies the pointer and key_ is freed twice)
+  TKey &operator=(const TKey &t1) {
+    if (this != &t1) {
+      delete[] key_;
+      key_type_ = t1.key_type_;
+      length_ = t1.length_;
+      key_ = new char[length_];
+      memcpy(key_, t1.key_, length_);
+    }
+    return *this;
+  }
+
 /* Reads a value from a char* (C-style string) and stores it in key_
     atoi() is for char* to int . */
   void ReadValue(const char *content) {
@@ -69,7 +82,8 @@ public:
       memcpy(key_, &a, length_);
     } break;
     case 2: {
-      memcpy(key_, content, length_);
+      // strncpy stops at the end of the value and fills the rest with zeros
+      strncpy(key_, content, length_);
     } break;
     }
   }
@@ -86,7 +100,7 @@ public:
       memcpy(key_, &a, length_);
     } break;
     case 2: {
-      memcpy(key_, str.c_str(), length_);
+      strncpy(key_, str.c_str(), length_);
     } break;
     }
   }

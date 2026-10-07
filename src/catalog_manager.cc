@@ -1,6 +1,11 @@
 #include "catalog_manager.h"
+#include <cstdio>
 #include <fstream>
+#include <iostream>
+#include <fcntl.h>
+#include <unistd.h>
 #include <boost/filesystem.hpp>
+#include "commons.h"
 
 using namespace std;
 
@@ -35,12 +40,32 @@ void CatalogManager::ReadArchiveFile() {
 
 void CatalogManager::WriteArchiveFile() {
   std::string file_name = path_ + "catalog";
+  // Written to a temporary file first, so a crash never leaves a half-written catalog
+  std::string tmp_name = file_name + ".tmp";
 
   std::ofstream ofs;
-  ofs.open(file_name.c_str(), std::ios::binary);
+  ofs.open(tmp_name.c_str(), std::ios::binary);
   boost::archive::binary_oarchive oar(ofs);
   oar << (*this);
+  ofs.flush();
+  bool written = ofs.good();
   ofs.close();
+
+  if (!written) {
+    std::cerr << "Failed to write catalog!" << std::endl;
+    remove(tmp_name.c_str());
+    return;
+  }
+
+  // Force the new catalog to disk before it replaces the old one
+  int fd = open(tmp_name.c_str(), O_RDONLY);
+  if (fd != -1) {
+    fsync(fd);
+    close(fd);
+  }
+  // rename() is atomic: the catalog is always either the old or the new version
+  rename(tmp_name.c_str(), file_name.c_str());
+  stats.catalog_writes++;
 }
 
 void CatalogManager::CreateDatabase(std::string dbname) {

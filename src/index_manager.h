@@ -2,6 +2,7 @@
 #define MINIDB_INDEX_MANAGER_H_
 
 #include <string>
+#include <vector>
 
 #include "buffer_manager.h"
 #include "catalog_manager.h"
@@ -39,6 +40,7 @@ private:
   BufferManager *hdl_;
   CatalogManager *cm_;
   std::string db_name_;
+  std::vector<BPlusTreeNode *> nodes_; // Nodes in use, freed when the operation ends
 
 public:
   BPlusTree(Index *idx, BufferManager *hdl, CatalogManager *cm,
@@ -49,7 +51,7 @@ public:
     degree_ = 2 * idx_->rank() + 1;
     db_name_ = db_name;
   }
-  ~BPlusTree() {}
+  ~BPlusTree() { FreeNodes(); }
 
   Index *idx() { return idx_; }
   int degree() { return degree_; }
@@ -71,6 +73,11 @@ public:
 
   int GetNewBlockNum() { return idx_->IncreaseMaxCount(); }
 
+  // Every node registers itself here, so that none of them is leaked
+  void AddNode(BPlusTreeNode *node) { nodes_.push_back(node); }
+  void RemoveNode(BPlusTreeNode *node);
+  void FreeNodes();
+
   void Print();
   void PrintNode(int num);
 
@@ -83,6 +90,7 @@ private:
   BPlusTree *tree_;
   int block_num_;
   int rank_;
+  BlockInfo *block_;
   char *buffer_;
   bool is_leaf_;
   bool is_new_node_;
@@ -90,7 +98,7 @@ private:
 public:
   BPlusTreeNode(bool isnew, BPlusTree *tree, int blocknum,
                 bool newleaf = false);
-  ~BPlusTreeNode() {}
+  ~BPlusTreeNode();
 
   int block_num() { return block_num_; }
 

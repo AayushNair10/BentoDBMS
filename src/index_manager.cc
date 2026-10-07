@@ -26,6 +26,9 @@ void IndexManager::CreateIndex(SQLCreateIndex &st) {
   }
 
   Attribute *attr = tbl->GetAttribute(st.col_name());
+  if (attr == NULL) {
+    throw ColumnNotExistException(st.col_name());
+  }
   if (attr->attr_type() != 1) {
     throw IndexMustBeCreatedOnPKException();
   }
@@ -48,6 +51,7 @@ void IndexManager::CreateIndex(SQLCreateIndex &st) {
   int block_num = tbl->first_block_num();
   for (int i = 0; i < tbl->block_count() && block_num != -1; ++i) {
     BlockInfo *bp = rm->GetBlockInfo(tbl, block_num);
+    BlockPin pin(bp);  // Index blocks are loaded while this block is scanned.
 
     for (int j = 0; j < bp->GetRecordCount(); ++j) {
       vector<TKey> tkey_value = rm->GetRecord(tbl, block_num, j);
@@ -62,10 +66,36 @@ void IndexManager::CreateIndex(SQLCreateIndex &st) {
   hdl_->WriteToDisk();
   cm_->WriteArchiveFile();
 
-  tree.Print();
+  if (!quiet_mode) {
+    tree.Print();
+  }
 }
 
 //=======================BPlusTree=======================//
+
+// Frees the nodes used by one tree operation when the operation returns.
+// Only used in Add, Remove, GetVal, UpdateVal and Print, which never call each other.
+struct NodeScope {
+  BPlusTree *tree;
+  NodeScope(BPlusTree *t) : tree(t) {}
+  ~NodeScope() { tree->FreeNodes(); }
+};
+
+void BPlusTree::RemoveNode(BPlusTreeNode *node) {
+  for (int i = nodes_.size() - 1; i >= 0; i--) {
+    if (nodes_[i] == node) {
+      nodes_.erase(nodes_.begin() + i);
+      return;
+    }
+  }
+}
+
+void BPlusTree::FreeNodes() {
+  while (!nodes_.empty()) {
+    // The destructor removes the node from nodes_
+    delete nodes_.back();
+  }
+}
 
 void BPlusTree::InitTree() {
   BPlusTreeNode *root_node =
@@ -79,6 +109,7 @@ void BPlusTree::InitTree() {
 }
 
 bool BPlusTree::Add(TKey &key, int block_num, int offset) {
+  NodeScope scope(this);
   int value = (block_num << 16) | offset;
 
   if (idx_->root() == -1) {
@@ -201,6 +232,7 @@ BPlusTreeNode *BPlusTree::GetNode(int num) {
 }
 
 void BPlusTree::Print() {
+  NodeScope scope(this);
   printf("*****************************************************\n");
   printf("KeyCount: %d, NodeCount: %d, Level: %d, Root: %d \n",
          idx_->key_count(), idx_->node_count(), idx_->level(), idx_->root());
@@ -220,9 +252,11 @@ void BPlusTree::PrintNode(int num) {
       PrintNode(pnode->GetValues(i));
     }
   }
+  delete pnode;
 }
 
 int BPlusTree::GetVal(TKey key) {
+  NodeScope scope(this);
   int ret = -1;
   if (idx_->root() == -1) {
     return ret;
@@ -235,6 +269,7 @@ int BPlusTree::GetVal(TKey key) {
 }
 
 bool BPlusTree::UpdateVal(TKey &key, int block_num, int offset) {
+  NodeScope scope(this);
   if (idx_->root() == -1) {
     return false;
   }
@@ -247,6 +282,7 @@ bool BPlusTree::UpdateVal(TKey &key, int block_num, int offset) {
 }
 
 bool BPlusTree::Remove(TKey key) {
+  NodeScope scope(this);
 
   if (idx_->root() == -1)
     return false;
@@ -382,7 +418,9 @@ bool BPlusTree::AdjustAfterRemove(int node) {
 
         for (int i = 0; i <= pnode->GetCount(); i++) {
           pbrother->SetValues(pbrother->GetCount() + i, pnode->GetValues(i));
-          GetNode(pnode->GetValues(i))->SetParent(pbrother->block_num());
+          BPlusTreeNode *child = GetNode(pnode->GetValues(i));
+          child->SetParent(pbrother->block_num());
+          delete child;
         }
 
         pbrother->SetCount(2 * idx_->rank());
@@ -453,7 +491,9 @@ bool BPlusTree::AdjustAfterRemove(int node) {
 
         for (int i = 0; i <= idx_->rank(); i++) {
           pnode->SetValues(pnode->GetCount() + i, pbrother->GetValues(i));
-          GetNode(pbrother->GetValues(i))->SetParent(pnode->block_num());
+          BPlusTreeNode *child = GetNode(pbrother->GetValues(i));
+          child->SetParent(pnode->block_num());
+          delete child;
         }
 
         pnode->SetCount(pnode->GetCount() + idx_->rank());
@@ -475,11 +515,18 @@ BPlusTreeNode::BPlusTreeNode(bool isnew, BPlusTree *tree, int blocknum,
   rank_ = (tree_->degree() - 1) / 2;
   block_num_ = blocknum;
   GetBuffer();
+  tree_->AddNode(this);
+  stats.node_visits++;
   if (isnew) {
     SetParent(-1);
     SetNodeType(newleaf ? 1 : 0);
     SetCount(0);
   }
+}
+
+BPlusTreeNode::~BPlusTreeNode() {
+  block_->Unpin();
+  tree_->RemoveNode(this);
 }
 
 bool BPlusTreeNode::GetIsLeaf() { return GetNodeType() == 1; }
@@ -551,6 +598,9 @@ void BPlusTreeNode::SetIsLeaf(bool val) { SetNodeType(val ? 1 : 0); }
 void BPlusTreeNode::GetBuffer() {
   BlockInfo *block = tree_->hdl()->GetFileBlock(
       tree_->db_name(), tree_->idx()->name(), FORMAT_INDEX, block_num_);
+  // Pinned until the node is destroyed, so buffer_ stays valid
+  block->Pin();
+  block_ = block;
   buffer_ = block->data();
   block->set_dirty(true);
 }
@@ -719,6 +769,7 @@ BPlusTreeNode *BPlusTreeNode::Split(TKey &key) {
       BPlusTreeNode *node = tree_->GetNode(childnode_num);
       if (node) {
         node->SetParent(newnode->block_num());
+        delete node;
       }
     }
 

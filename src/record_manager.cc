@@ -26,6 +26,11 @@ void RecordManager::Insert(SQLInsert &st) {
     throw TableNotExistException();
   }
 
+  // Every column needs a value.
+  if (values_size != tbl->GetAttributeNum()) {
+    throw ColumnCountNotMatchException();
+  }
+
   // Calculate the maximum number of records that can be stored in one block
   int max_count = (4096 - 12) / (tbl->record_length());
 
@@ -34,7 +39,8 @@ void RecordManager::Insert(SQLInsert &st) {
 
   // Convert each input value into the TKey format and check if it is a primary key
   for (int i = 0; i < values_size; i++) {
-    int value_type = st.values()[i].data_type;
+    // Use the column's type, whatever the value looks like (e.g. 2 for a float column)
+    int value_type = tbl->ats()[i].data_type();
     string value = st.values()[i].value;
     int length = tbl->ats()[i].length();
 
@@ -117,6 +123,7 @@ void RecordManager::Insert(SQLInsert &st) {
   // If no useful block has free space, try using a rubbish block.
   if (frb != -1) {
     BlockInfo *bp = GetBlockInfo(tbl, frb);
+    BlockPin pin(bp);  // Other blocks are loaded below while bp is still in use.
     content = bp->GetContentAddress();
     for (vector<TKey>::iterator iter = tkey_values.begin(); iter != tkey_values.end(); ++iter) {
       memcpy(content, iter->key(), iter->length());
@@ -285,7 +292,7 @@ void RecordManager::Select(SQLSelect &st) {
   }
 
   // Optionally print the B+ tree structure for the first index for debugging.
-  if (tbl->GetIndexNum() != 0) {
+  if (!quiet_mode && tbl->GetIndexNum() != 0) {
     BPlusTree tree(tbl->GetIndex(0), hdl_, cm_, db_name_);
     tree.Print();
   }
@@ -445,6 +452,7 @@ void RecordManager::Update(SQLUpdate &st) {
   int block_num = tbl->first_block_num();
   for (int i = 0; i < tbl->block_count() && block_num != -1; ++i) {
     BlockInfo *bp = GetBlockInfo(tbl, block_num);
+    BlockPin pin(bp);  // Index blocks are loaded while this block is scanned.
     for (int j = 0; j < bp->GetRecordCount(); ++j) {
       vector<TKey> tkey_value = GetRecord(tbl, block_num, j);
       bool sats = true;
@@ -522,9 +530,11 @@ void RecordManager::Join(SQLJoin &st) {
       break;
     }
   }
-  if (colIndex1 == -1 || colIndex2 == -1) {
-    cout<<"Join column not found in one of the tables.";
-    throw SyntaxErrorException();
+  if (colIndex1 == -1) {
+    throw ColumnNotExistException(st.col_name1());
+  }
+  if (colIndex2 == -1) {
+    throw ColumnNotExistException(st.col_name2());
   }
 
   vector<vector<TKey>> tkey_values;
@@ -533,6 +543,7 @@ void RecordManager::Join(SQLJoin &st) {
   int block1 = tbl1->first_block_num();
   for (int b1 = 0; b1 < tbl1->block_count() && block1 != -1; ++b1) {
     BlockInfo *bp1 = GetBlockInfo(tbl1, block1);
+    BlockPin pin(bp1);  // The whole second table is loaded while this block is scanned.
     for (int r1 = 0; r1 < bp1->GetRecordCount(); ++r1) {
       vector<TKey> rec1 = GetRecord(tbl1, block1, r1);
       TKey key1 = rec1[colIndex1];
@@ -613,6 +624,7 @@ std::vector<TKey> RecordManager::GetRecord(Table *tbl, int block_num,
 
 void RecordManager::DeleteRecord(Table *tbl, int block_num, int offset) {
   BlockInfo *bp = GetBlockInfo(tbl, block_num);
+  BlockPin pin(bp);  // Neighbour and index blocks are loaded below.
 
   int last = bp->GetRecordCount() - 1;
   char *content = bp->data() + offset * tbl->record_length() + 12;
