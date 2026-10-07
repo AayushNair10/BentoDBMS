@@ -95,14 +95,14 @@ BlockInfo *FileHandle::RecycleBlock() {
   FileInfo *fp = first_file_;
 
   BlockInfo *oldestbefore = NULL;
-  BlockInfo *oldest = fp->first_block();
+  BlockInfo *oldest = NULL;
 
   while (fp != NULL) {
     BlockInfo *bpbefore = NULL;
     BlockInfo *bp = fp->first_block();
     while (bp != NULL) {
 
-      if (bp->age() > oldest->age()) {
+      if (oldest == NULL || bp->age() > oldest->age()) {
         oldestbefore = bpbefore;
         oldest = bp;
       }
@@ -114,6 +114,7 @@ BlockInfo *FileHandle::RecycleBlock() {
 
   if (oldest->dirty()) {
     oldest->WriteInfo(path_);
+    oldest->set_dirty(false);
   }
 
   if (oldestbefore == NULL) {

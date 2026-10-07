@@ -3,6 +3,9 @@
 #include <fstream>
 #include <iostream>
 
+#include <fcntl.h>
+#include <sys/file.h>
+
 #include <boost/algorithm/string.hpp>
 #include <boost/filesystem.hpp>
 #include <boost/regex.hpp>
@@ -14,7 +17,24 @@ using namespace std;
 
 //Constructor
 Interpreter::Interpreter() : sql_type_(-1) {
-  string p = string(getenv("HOME")) + "/MiniDBData/";
+  const char *home = getenv("HOME");
+  if (home == NULL) {
+    cerr << "HOME is not set" << endl;
+    exit(1);
+  }
+  string p = string(home) + "/MiniDBData/";
+  // Only one instance may use the data folder at a time. The lock is held
+  // until the process exits.
+  string lock_path = p + ".lock";
+  int lock_fd = open(lock_path.c_str(), O_RDWR | O_CREAT, 0644);
+  if (lock_fd == -1) {
+    cerr << "Cannot open " << lock_path << " (does " << p << " exist?)" << endl;
+    exit(1);
+  }
+  if (flock(lock_fd, LOCK_EX | LOCK_NB) == -1) {
+    cerr << "Another MiniDB instance is already using " << p << endl;
+    exit(1);
+  }
   api = new MiniDBAPI(p);
 }
 
@@ -242,7 +262,7 @@ void Interpreter::Run() {
       SQLUpdate *st = new SQLUpdate(sql_vector_);
       api->Update(*st);
       delete st;
-    }
+    } break;
     case 120: {
       SQLJoin *st = new SQLJoin(sql_vector_);
         api->Join(*st);

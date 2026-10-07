@@ -67,6 +67,7 @@ public:
   FindNodeParam SearchBranch(int node, TKey &key);
   BPlusTreeNode *GetNode(int num);
   int GetVal(TKey key);
+  bool UpdateVal(TKey &key, int block_num, int offset);
 
   int GetNewBlockNum() { return idx_->IncreaseMaxCount(); }
 

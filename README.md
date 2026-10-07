@@ -15,7 +15,25 @@ On Mac OS X, XCode could be used to open "MiniDB.xcodeproj" directly. It's recom
 
 On platforms where Eclipse is availbable, the whole folder could be imported to Eclipse.
 
-To run it, you need to have global environment variable "HOME" set, the data will be stored at "$HOME/MiniDBData".
+To build from the command line, only boost is needed:
+```
+# macOS (Homebrew)
+brew install boost
+clang++ -std=c++17 src/*.cc -o minidb -I$(brew --prefix)/include -L$(brew --prefix)/lib -lboost_filesystem -lboost_regex -lboost_serialization
+
+# Linux
+sudo apt install g++ libboost-filesystem-dev libboost-regex-dev libboost-serialization-dev
+g++ -std=c++17 src/*.cc -o minidb -lboost_filesystem -lboost_regex -lboost_serialization
+```
+
+To run it, you need to have global environment variable "HOME" set, the data will be stored at "$HOME/MiniDBData". This folder must exist before starting:
+```
+mkdir -p ~/MiniDBData && ./minidb
+```
+
+## Concurrency
+
+BentoDBMS is single-process and single-threaded. On startup it takes an exclusive lock on "$HOME/MiniDBData/.lock" and holds it until it exits. A second instance pointed at the same data folder prints an error and exits instead of corrupting the data. The lock is released automatically when the process exits or crashes.
 
 ## Features
 

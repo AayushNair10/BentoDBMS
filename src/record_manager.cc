@@ -60,7 +60,7 @@ void RecordManager::Insert(SQLInsert &st) {
     } else {
       // If no index exists, iterate through each block and record to check for a duplicate.
       int block_num = tbl->first_block_num();
-      for (int i = 0; i < tbl->block_count(); ++i) {
+      for (int i = 0; i < tbl->block_count() && block_num != -1; ++i) {
         BlockInfo *bp = GetBlockInfo(tbl, block_num);
         for (int j = 0; j < bp->GetRecordCount(); ++j) {
           vector<TKey> tkey_value = GetRecord(tbl, block_num, j);
@@ -76,7 +76,7 @@ void RecordManager::Insert(SQLInsert &st) {
   char *content;
   int ub = tbl->first_block_num();    // The first "useful" block.
   int frb = tbl->first_rubbish_num();   // The first "rubbish" (reusable) block.
-  int lastub;
+  int lastub = -1;
   int blocknum, offset;
 
   // Search for a useful block with free space.
@@ -105,12 +105,8 @@ void RecordManager::Insert(SQLInsert &st) {
     // Update the index with the new record if an index exists.
     if (tbl->GetIndexNum() != 0) {
       BPlusTree tree(tbl->GetIndex(0), hdl_, cm_, db_name_);
-      for (int i = 0; i < tbl->ats().size(); ++i) {
-        if (tbl->GetIndex(0)->attr_name() == tbl->GetIndex(i)->attr_name()) {
-          tree.Add(tkey_values[i], blocknum, offset);
-          break;
-        }
-      }
+      int col = tbl->GetAttributeIndex(tbl->GetIndex(0)->attr_name());
+      tree.Add(tkey_values[col], blocknum, offset);
     }
 
     hdl_->WriteToDisk();
@@ -128,10 +124,23 @@ void RecordManager::Insert(SQLInsert &st) {
     }
     bp->SetRecordCount(1);
 
-    // Link the rubbish block into the chain of useful blocks.
-    BlockInfo *lastubp = GetBlockInfo(tbl, lastub);
-    lastubp->SetNextBlockNum(frb);
-    tbl->set_first_rubbish_num(bp->GetNextBlockNum());
+    // Unlink the block from the rubbish chain.
+    int next_rubbish = bp->GetNextBlockNum();
+    tbl->set_first_rubbish_num(next_rubbish);
+    if (next_rubbish != -1) {
+      BlockInfo *nrbp = GetBlockInfo(tbl, next_rubbish);
+      nrbp->SetPrevBlockNum(-1);
+      hdl_->WriteBlock(nrbp);
+    }
+
+    // Link it to the end of the chain of useful blocks (or make it the head).
+    if (lastub != -1) {
+      BlockInfo *lastubp = GetBlockInfo(tbl, lastub);
+      lastubp->SetNextBlockNum(frb);
+      hdl_->WriteBlock(lastubp);
+    } else {
+      tbl->set_first_block_num(frb);
+    }
 
     bp->SetPrevBlockNum(lastub);
     bp->SetNextBlockNum(-1);
@@ -140,7 +149,6 @@ void RecordManager::Insert(SQLInsert &st) {
     offset = 0;
 
     hdl_->WriteBlock(bp);
-    hdl_->WriteBlock(lastubp);
   } else {
     // If no rubbish block is available, add a new block 
     int next_block = tbl->first_block_num();
@@ -172,12 +180,8 @@ void RecordManager::Insert(SQLInsert &st) {
   // After inserting, update the index with the new record if an index exists.
   if (tbl->GetIndexNum() != 0) {
     BPlusTree tree(tbl->GetIndex(0), hdl_, cm_, db_name_);
-    for (int i = 0; i < tbl->ats().size(); ++i) {
-      if (tbl->GetIndex(0)->attr_name() == tbl->GetIndex(i)->name()) {
-        tree.Add(tkey_values[i], blocknum, offset);
-        break;
-      }
-    }
+    int col = tbl->GetAttributeIndex(tbl->GetIndex(0)->attr_name());
+    tree.Add(tkey_values[col], blocknum, offset);
   }
   cm_->WriteArchiveFile();
   hdl_->WriteToDisk();
@@ -214,7 +218,7 @@ void RecordManager::Select(SQLSelect &st) {
   // Full table scan if no index is applicable.
   if (!has_index) {
     int block_num = tbl->first_block_num();
-    for (int i = 0; i < tbl->block_count(); ++i) {
+    for (int i = 0; i < tbl->block_count() && block_num != -1; ++i) {
       BlockInfo *bp = GetBlockInfo(tbl, block_num);
       for (int j = 0; j < bp->GetRecordCount(); ++j) {
         vector<TKey> tkey_value = GetRecord(tbl, block_num, j);
@@ -316,11 +320,13 @@ void RecordManager::Delete(SQLDelete &st) {
   if (!has_index) {
     // Iterate through all blocks in the table.
     int block_num = tbl->first_block_num();
-    for (int i = 0; i < tbl->block_count(); ++i) {
+    for (int i = 0; i < tbl->block_count() && block_num != -1; ++i) {
       BlockInfo *bp = GetBlockInfo(tbl, block_num);
-      int count = bp->GetRecordCount();
-      // For each record in the block, check if it satisfies all conditions.
-      for (int j = 0; j < count; ++j) {
+      // Read the next block first: emptying this block moves it to the rubbish chain.
+      int next_block_num = bp->GetNextBlockNum();
+      // Walk backwards: DeleteRecord fills the hole with the last row, which
+      // has already been checked.
+      for (int j = bp->GetRecordCount() - 1; j >= 0; --j) {
         vector<TKey> tkey_value = GetRecord(tbl, block_num, j);
         bool sats = true;
         for (int k = 0; k < st.wheres().size(); ++k) {
@@ -333,19 +339,14 @@ void RecordManager::Delete(SQLDelete &st) {
           DeleteRecord(tbl, block_num, j);
           // Additionally update the index (if it exists) by removing the corresponding key.
           if (tbl->GetIndexNum() != 0) {
-            BPlusTree tree(tbl->GetIndex(index_idx), hdl_, cm_, db_name_);
-            int idx = -1;
-            for (int i = 0; i < tbl->GetAttributeNum(); ++i) {
-              if (tbl->ats()[i].attr_name() == tbl->GetIndex(index_idx)->attr_name()) {
-                idx = i;
-              }
-            }
+            BPlusTree tree(tbl->GetIndex(0), hdl_, cm_, db_name_);
+            int idx = tbl->GetAttributeIndex(tbl->GetIndex(0)->attr_name());
             tree.Remove(tkey_value[idx]);
           }
         }
       }
       // Move to the next block.
-      block_num = bp->GetNextBlockNum();
+      block_num = next_block_num;
     }
   } else {  
     // Use the index to quickly locate the record matching the equality condition.
@@ -384,6 +385,7 @@ void RecordManager::Delete(SQLDelete &st) {
 
   // Write changes to disk.
   hdl_->WriteToDisk();
+  cm_->WriteArchiveFile();
 }
 
 void RecordManager::Update(SQLUpdate &st) {
@@ -426,7 +428,7 @@ void RecordManager::Update(SQLUpdate &st) {
     } else {
       // No index available, so perform a full scan to detect conflicts.
       int block_num = tbl->first_block_num();
-      for (int i = 0; i < tbl->block_count(); ++i) {
+      for (int i = 0; i < tbl->block_count() && block_num != -1; ++i) {
         BlockInfo *bp = GetBlockInfo(tbl, block_num);
         for (int j = 0; j < bp->GetRecordCount(); ++j) {
           vector<TKey> tkey_value = GetRecord(tbl, block_num, j);
@@ -441,7 +443,7 @@ void RecordManager::Update(SQLUpdate &st) {
 
   // Iterate through the table blocks to update matching records.
   int block_num = tbl->first_block_num();
-  for (int i = 0; i < tbl->block_count(); ++i) {
+  for (int i = 0; i < tbl->block_count() && block_num != -1; ++i) {
     BlockInfo *bp = GetBlockInfo(tbl, block_num);
     for (int j = 0; j < bp->GetRecordCount(); ++j) {
       vector<TKey> tkey_value = GetRecord(tbl, block_num, j);
@@ -489,6 +491,7 @@ void RecordManager::Update(SQLUpdate &st) {
 
   // Write changes to disk.
   hdl_->WriteToDisk();
+  cm_->WriteArchiveFile();
 }
 
 //--------------------------------JOIN FUNCTION----------------------------------//
@@ -611,10 +614,20 @@ std::vector<TKey> RecordManager::GetRecord(Table *tbl, int block_num,
 void RecordManager::DeleteRecord(Table *tbl, int block_num, int offset) {
   BlockInfo *bp = GetBlockInfo(tbl, block_num);
 
+  int last = bp->GetRecordCount() - 1;
   char *content = bp->data() + offset * tbl->record_length() + 12;
-  char *replace =
-      bp->data() + (bp->GetRecordCount() - 1) * tbl->record_length() + 12;
-  memcpy(content, replace, tbl->record_length());
+  char *replace = bp->data() + last * tbl->record_length() + 12;
+
+  if (offset != last) {
+    // Fill the hole with the last row, then point its index entry at the new slot.
+    memcpy(content, replace, tbl->record_length());
+    if (tbl->GetIndexNum() != 0) {
+      int col = tbl->GetAttributeIndex(tbl->GetIndex(0)->attr_name());
+      vector<TKey> moved = GetRecord(tbl, block_num, offset);
+      BPlusTree tree(tbl->GetIndex(0), hdl_, cm_, db_name_);
+      tree.UpdateVal(moved[col], block_num, offset);
+    }
+  }
 
   bp->DecreaseRecordCount();
 
@@ -628,6 +641,8 @@ void RecordManager::DeleteRecord(Table *tbl, int block_num, int offset) {
       BlockInfo *pbp = GetBlockInfo(tbl, prevnum);
       pbp->SetNextBlockNum(nextnum);
       hdl_->WriteBlock(pbp);
+    } else {
+      tbl->set_first_block_num(nextnum);
     }
 
     if (nextnum != -1) {
@@ -641,6 +656,7 @@ void RecordManager::DeleteRecord(Table *tbl, int block_num, int offset) {
     bp->SetPrevBlockNum(-1);
     if (firstrubbish != NULL) {
       firstrubbish->SetPrevBlockNum(block_num);
+      hdl_->WriteBlock(firstrubbish);
       bp->SetNextBlockNum(firstrubbish->block_num());
     }
     tbl->set_first_rubbish_num(block_num);

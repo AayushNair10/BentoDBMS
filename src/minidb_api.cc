@@ -14,7 +14,9 @@
 
 using namespace std;
 
-MiniDBAPI::MiniDBAPI(std::string p) : path_(p) { cm_ = new CatalogManager(p); }
+MiniDBAPI::MiniDBAPI(std::string p) : path_(p), hdl_(NULL) {
+  cm_ = new CatalogManager(p);
+}
 
 MiniDBAPI::~MiniDBAPI() {
   // hdl_ is initialized in #Use#
@@ -24,7 +26,9 @@ MiniDBAPI::~MiniDBAPI() {
 
 void MiniDBAPI::Quit() {
   delete hdl_;
+  hdl_ = NULL;
   delete cm_;
+  cm_ = NULL;
   std::cout << "Quiting..." << std::endl;
 }
 
@@ -54,7 +58,6 @@ void MiniDBAPI::CreateDatabase(SQLCreateDatabase &st) {
   std::string folder_name(path_ + st.db_name());
   boost::filesystem::path folder_path(folder_name);
  //Used to define language used in the file system
-  folder_path.imbue(std::locale("en_US.UTF-8"));
 
   if (cm_->GetDB(st.db_name()) != NULL) {
     throw DatabaseAlreadyExistsException();
@@ -102,7 +105,6 @@ void MiniDBAPI::DropDatabase(SQLDropDatabase &st) {
   std::string folder_name(path_ + st.db_name());
   boost::filesystem::path folder_path(folder_name);
 
-  folder_path.imbue(std::locale("en_US.UTF-8"));
   //Check if the file exists
   if (!boost::filesystem::exists(folder_path)) {
     std::cout << "Database folder doesn't exists!" << std::endl;
@@ -118,6 +120,7 @@ void MiniDBAPI::DropDatabase(SQLDropDatabase &st) {
   if (st.db_name() == curr_db_) {
     curr_db_ = "";
     delete hdl_;
+    hdl_ = NULL;
   }
 }
 

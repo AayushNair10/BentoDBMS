@@ -46,7 +46,7 @@ void IndexManager::CreateIndex(SQLCreateIndex &st) {
   int col_idx = tbl->GetAttributeIndex(st.col_name());
 
   int block_num = tbl->first_block_num();
-  for (int i = 0; i < tbl->block_count(); ++i) {
+  for (int i = 0; i < tbl->block_count() && block_num != -1; ++i) {
     BlockInfo *bp = rm->GetBlockInfo(tbl, block_num);
 
     for (int j = 0; j < bp->GetRecordCount(); ++j) {
@@ -70,7 +70,7 @@ void IndexManager::CreateIndex(SQLCreateIndex &st) {
 void BPlusTree::InitTree() {
   BPlusTreeNode *root_node =
       new BPlusTreeNode(true, this, GetNewBlockNum(), true);
-  idx_->set_root(0);
+  idx_->set_root(root_node->block_num());
   idx_->set_leaf_head(idx_->root());
   idx_->set_key_count(0);
   idx_->set_node_count(1);
@@ -224,11 +224,26 @@ void BPlusTree::PrintNode(int num) {
 
 int BPlusTree::GetVal(TKey key) {
   int ret = -1;
+  if (idx_->root() == -1) {
+    return ret;
+  }
   FindNodeParam fnp = Search(idx_->root(), key);
   if (fnp.flag) {
     ret = fnp.pnode->GetValues(fnp.index);
   }
   return ret;
+}
+
+bool BPlusTree::UpdateVal(TKey &key, int block_num, int offset) {
+  if (idx_->root() == -1) {
+    return false;
+  }
+  FindNodeParam fnp = Search(idx_->root(), key);
+  if (!fnp.flag) {
+    return false;
+  }
+  fnp.pnode->SetValues(fnp.index, (block_num << 16) | offset);
+  return true;
 }
 
 bool BPlusTree::Remove(TKey key) {

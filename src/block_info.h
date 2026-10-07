@@ -38,7 +38,7 @@ public:
   long age() { return age_; }
 
   bool dirty() { return dirty_; }
-  void set_dirty(bool dt) { dirty_ = true; }
+  void set_dirty(bool dt) { dirty_ = dt; }
 
   BlockInfo *next() { return next_; }
   void set_next(BlockInfo *block) { next_ = block; }

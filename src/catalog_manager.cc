@@ -23,7 +23,6 @@ void CatalogManager::ReadArchiveFile() {
   std::string file_name = path_ + "catalog";
   boost::filesystem::path file_path(file_name);
 
-  file_path.imbue(std::locale("en_US.UTF-8"));
 
   if (boost::filesystem::exists(file_path)) {
     std::ifstream ifs;
